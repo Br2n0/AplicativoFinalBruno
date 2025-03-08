@@ -1,99 +1,161 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { FamilyMember } from '../types';
+import { supabase } from './supabase';
+import { getCurrentUser } from './supabase';
+import { Database } from '../types/supabase';
+import { ErrorService } from './ErrorService';
 
-const STORAGE_KEY = '@tarefas:family_members';
+type FamilyMemberRow = Database['public']['Tables']['family_members']['Row'];
 
 export class FamilyMemberService {
   // Buscar todos os membros da família
   static async getFamilyMembers(): Promise<FamilyMember[]> {
     try {
-      const data = await AsyncStorage.getItem(STORAGE_KEY);
-      return data ? JSON.parse(data) : [];
+      const user = await getCurrentUser();
+      
+      if (!user) {
+        throw new Error('Usuário não autenticado');
+      }
+      
+      const { data, error } = await supabase
+        .from('family_members')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('name');
+        
+      if (error) throw error;
+      
+      return (data || []).map((row: FamilyMemberRow) => ({
+        id: row.id,
+        name: row.name,
+        userId: row.user_id,
+        familyId: '', // Será implementado quando tivermos a tabela de famílias
+        role: 'admin', // Valor padrão até implementarmos a lógica de papéis
+        joinedAt: row.created_at
+      }));
     } catch (error) {
-      console.error('Erro ao buscar membros da família:', error);
-      return [];
+      ErrorService.logError('FamilyMemberService.getFamilyMembers', error);
+      throw new Error(ErrorService.handleSupabaseError(error));
     }
   }
 
   // Adicionar um novo membro à família
   static async addFamilyMember(member: Omit<FamilyMember, 'id'>): Promise<FamilyMember> {
     try {
-      const members = await this.getFamilyMembers();
-      const newMember: FamilyMember = {
-        ...member,
-        id: Date.now().toString(),
+      const user = await getCurrentUser();
+      
+      if (!user) {
+        throw new Error('Usuário não autenticado');
+      }
+      
+      const { data, error } = await supabase
+        .from('family_members')
+        .insert([
+          {
+            name: member.name,
+            avatar: null, // Implementar upload de avatar posteriormente
+            user_id: user.id,
+            created_at: new Date().toISOString()
+          }
+        ])
+        .select()
+        .single();
+        
+      if (error) throw error;
+      
+      return {
+        id: data.id,
+        name: data.name,
+        userId: data.user_id,
+        familyId: '', // Será implementado quando tivermos a tabela de famílias
+        role: 'admin', // Valor padrão até implementarmos a lógica de papéis
+        joinedAt: data.created_at
       };
-
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify([...members, newMember]));
-      return newMember;
     } catch (error) {
-      console.error('Erro ao adicionar membro da família:', error);
-      throw error;
+      ErrorService.logError('FamilyMemberService.addFamilyMember', error);
+      throw new Error(ErrorService.handleSupabaseError(error));
     }
   }
 
-  // Buscar membro por ID
+  // Buscar um membro da família por ID
   static async getFamilyMemberById(id: string): Promise<FamilyMember | null> {
     try {
-      const members = await this.getFamilyMembers();
-      return members.find(member => member.id === id) || null;
+      const { data, error } = await supabase
+        .from('family_members')
+        .select('*')
+        .eq('id', id)
+        .single();
+        
+      if (error) throw error;
+      
+      if (!data) return null;
+      
+      return {
+        id: data.id,
+        name: data.name,
+        userId: data.user_id,
+        familyId: '', // Será implementado quando tivermos a tabela de famílias
+        role: 'admin', // Valor padrão até implementarmos a lógica de papéis
+        joinedAt: data.created_at
+      };
     } catch (error) {
-      console.error('Erro ao buscar membro da família por ID:', error);
+      ErrorService.logError('FamilyMemberService.getFamilyMemberById', error);
       return null;
     }
   }
 
-  // Buscar membros por família
+  // Buscar membros da família por ID da família (será implementado posteriormente)
   static async getFamilyMembersByFamilyId(familyId: string): Promise<FamilyMember[]> {
-    try {
-      const members = await this.getFamilyMembers();
-      return members.filter(member => member.familyId === familyId);
-    } catch (error) {
-      console.error('Erro ao buscar membros por família:', error);
-      return [];
-    }
+    // Esta função será implementada quando tivermos a tabela de famílias
+    return [];
   }
 
-  // Atualizar membro
+  // Atualizar um membro da família
   static async updateFamilyMember(id: string, updates: Partial<FamilyMember>): Promise<FamilyMember | null> {
     try {
-      const members = await this.getFamilyMembers();
-      const index = members.findIndex(member => member.id === id);
+      const { data, error } = await supabase
+        .from('family_members')
+        .update({
+          name: updates.name
+          // Outros campos serão adicionados conforme necessário
+        })
+        .eq('id', id)
+        .select()
+        .single();
+        
+      if (error) throw error;
       
-      if (index === -1) return null;
-
-      const updatedMember = { ...members[index], ...updates };
-      members[index] = updatedMember;
-
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(members));
-      return updatedMember;
+      return {
+        id: data.id,
+        name: data.name,
+        userId: data.user_id,
+        familyId: '', // Será implementado quando tivermos a tabela de famílias
+        role: 'admin', // Valor padrão até implementarmos a lógica de papéis
+        joinedAt: data.created_at
+      };
     } catch (error) {
-      console.error('Erro ao atualizar membro da família:', error);
-      throw error;
+      ErrorService.logError('FamilyMemberService.updateFamilyMember', error);
+      return null;
     }
   }
 
-  // Remover membro
+  // Remover um membro da família
   static async removeFamilyMember(id: string): Promise<void> {
     try {
-      const members = await this.getFamilyMembers();
-      const filteredMembers = members.filter(member => member.id !== id);
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(filteredMembers));
+      const { error } = await supabase
+        .from('family_members')
+        .delete()
+        .eq('id', id);
+        
+      if (error) throw error;
     } catch (error) {
-      console.error('Erro ao remover membro da família:', error);
-      throw error;
+      ErrorService.logError('FamilyMemberService.removeFamilyMember', error);
+      throw new Error(ErrorService.handleSupabaseError(error));
     }
   }
 
-  // Verificar se usuário é admin de uma família
+  // Verificar se um usuário é administrador de uma família (será implementado posteriormente)
   static async isUserFamilyAdmin(userId: string, familyId: string): Promise<boolean> {
-    try {
-      const members = await this.getFamilyMembers();
-      const member = members.find(m => m.userId === userId && m.familyId === familyId);
-      return member?.role === 'admin' || false;
-    } catch (error) {
-      console.error('Erro ao verificar permissão de admin:', error);
-      return false;
-    }
+    // Esta função será implementada quando tivermos a tabela de famílias
+    return true;
   }
 }

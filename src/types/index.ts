@@ -21,6 +21,7 @@ export interface Task {
   // Define o tipo para um membro da família
   export interface FamilyMember {
     id: string;
+    name: string; // Nome do membro da família
     userId: string;
     familyId: string;
     role: 'admin' | 'member';
