@@ -1,134 +1,183 @@
-import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, FlatList, Text } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import React, { useState, useMemo, useEffect } from 'react';
+import { 
+  StyleSheet, 
+  View, 
+  FlatList, 
+  ActivityIndicator,
+  Text 
+} from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
+import { TaskCard } from '../components/TaskCard';
+import { FloatingActionButton } from '../components/FloatingActionButton';
+import { SearchBar } from '../components/SearchBar';
+import { useTasks } from '../hooks/useTasks';
 import { useTheme } from '../contexts/ThemeContext';
-import HomeHeader from '../components/HomeHeader';
-import TaskCard from '../components/TaskCard';
-import SearchBar from '../components/SearchBar';
-import CategoryPicker from '../components/CategoryPicker';
-import FloatingActionButton from '../components/FloatingActionButton';
-import { Task, TaskCategory } from '../types';
+import { Task, Category } from '../types';
+import { CategoryService } from '../services/CategoryService';
 
-// Dados de exemplo para tarefas
-const MOCK_TASKS: Task[] = [
-  {
-    id: '1',
-    title: 'Limpar a cozinha',
-    description: 'Lavar a louça e limpar o fogão',
-    completed: false,
-    category: 'cozinha',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    userId: '1'
-  },
-  {
-    id: '2',
-    title: 'Fazer compras',
-    description: 'Comprar leite, pão e ovos',
-    completed: true,
-    category: 'compras',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    userId: '1'
-  },
-  {
-    id: '3',
-    title: 'Lavar roupas',
-    description: 'Separar roupas claras e escuras',
-    completed: false,
-    category: 'lavanderia',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    userId: '1'
-  },
-  {
-    id: '4',
-    title: 'Trocar lâmpada',
-    description: 'Comprar lâmpada nova para o quarto',
-    completed: false,
-    category: 'manutenção',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    userId: '1'
-  },
-];
-
-/**
- * Tela principal do aplicativo
- * 
- * Exibe a lista de tarefas com opções de filtro e pesquisa
- */
-const HomeScreen = () => {
-  const navigation = useNavigation();
+export const HomeScreen = ({ navigation }: any) => {
   const { theme } = useTheme();
-  const [tasks, setTasks] = useState<Task[]>(MOCK_TASKS);
+  const { tasks, loading, error, loadTasks } = useTasks();
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<TaskCategory | null>(null);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [localTasks, setLocalTasks] = useState<Task[]>([]);
 
-  // Filtra as tarefas com base na pesquisa e categoria selecionada
-  const filteredTasks = tasks.filter(task => {
-    const matchesSearch = task.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                         (task.description?.toLowerCase().includes(searchQuery.toLowerCase()) || false);
-    const matchesCategory = selectedCategory ? task.category === selectedCategory : true;
-    return matchesSearch && matchesCategory;
-  });
+  // Recarrega as tarefas sempre que a tela receber foco
+  useFocusEffect(
+    React.useCallback(() => {
+      loadTasks();
+    }, [loadTasks])
+  );
 
-  // Navega para a tela de detalhes da tarefa
+  // Atualiza as tarefas locais quando as tarefas do hook são carregadas
+  useEffect(() => {
+    setLocalTasks(tasks);
+  }, [tasks]);
+
+  // Carrega todas as categorias para usar na pesquisa
+  useEffect(() => {
+    const loadCategories = async () => {
+      try {
+        const loadedCategories = await CategoryService.getCategories();
+        setCategories(loadedCategories);
+      } catch (error) {
+        console.error('Erro ao carregar categorias:', error);
+      }
+    };
+    
+    loadCategories();
+  }, []);
+
+  // Função para formatar a data para comparação na pesquisa
+  const formatDateForSearch = (dateStr: string | undefined) => {
+    if (!dateStr) return '';
+    try {
+      return new Date(dateStr).toLocaleDateString('pt-BR');
+    } catch (error) {
+      return '';
+    }
+  };
+
+  // Filtra as tarefas por nome, categoria e prazo
+  const filteredTasks = useMemo(() => {
+    let filtered = localTasks;
+
+    // Filtra por texto de pesquisa
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase().trim();
+      filtered = filtered.filter(task => {
+        // Pesquisa por título ou descrição
+        const titleMatch = task.title.toLowerCase().includes(query);
+        const descriptionMatch = task.description?.toLowerCase().includes(query) || false;
+        
+        // Pesquisa por categoria
+        let categoryMatch = false;
+        if (task.categoryId) {
+          const category = categories.find(cat => cat.id === task.categoryId);
+          if (category) {
+            categoryMatch = category.name.toLowerCase().includes(query);
+          }
+        }
+        
+        // Pesquisa por prazo
+        const deadlineMatch = formatDateForSearch(task.deadline).toLowerCase().includes(query);
+        
+        return titleMatch || descriptionMatch || categoryMatch || deadlineMatch;
+      });
+    }
+
+    return filtered;
+  }, [localTasks, searchQuery, categories]);
+
   const handleTaskPress = (task: Task) => {
-    // @ts-ignore - Navegação tipada corretamente no arquivo de navegação
     navigation.navigate('TaskDetails', { taskId: task.id });
   };
 
-  // Alterna o estado de conclusão da tarefa
-  const handleToggleComplete = (task: Task) => {
-    const updatedTasks = tasks.map(t => 
-      t.id === task.id ? { ...t, completed: !t.completed } : t
+  // Função para lidar com a mudança de status na tela home
+  const handleStatusChange = (updatedTask: Task) => {
+    // Atualiza a tarefa na lista local
+    setLocalTasks(prevTasks => 
+      prevTasks.map(task => 
+        task.id === updatedTask.id ? updatedTask : task
+      )
     );
-    setTasks(updatedTasks);
   };
 
-  // Navega para a tela de criação de tarefa
-  const handleAddTask = () => {
-    // @ts-ignore - Navegação tipada corretamente no arquivo de navegação
-    navigation.navigate('TaskForm');
+  const handleClearSearch = () => {
+    setSearchQuery('');
   };
+
+  if (loading) {
+    return (
+      <View style={[
+        styles.centerContainer,
+        { backgroundColor: theme.colors.background }
+      ]}>
+        <ActivityIndicator size="large" color={theme.colors.primary} />
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={[
+        styles.centerContainer,
+        { backgroundColor: theme.colors.background }
+      ]}>
+        <Text style={[
+          styles.errorText,
+          { color: theme.colors.error }
+        ]}>
+          {error}
+        </Text>
+      </View>
+    );
+  }
 
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <HomeHeader />
-      
-      <View style={styles.filtersContainer}>
-        <SearchBar 
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          placeholder="Buscar tarefas..."
-        />
-        
-        <CategoryPicker
-          selectedCategory={selectedCategory}
-          onSelectCategory={setSelectedCategory}
-        />
-      </View>
-      
+    <View style={[
+      styles.container,
+      { backgroundColor: theme.colors.background }
+    ]}>
+      <SearchBar
+        value={searchQuery}
+        onChangeText={setSearchQuery}
+        onClear={handleClearSearch}
+      />
       <FlatList
         data={filteredTasks}
-        keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
-          <TaskCard 
-            task={item} 
+          <TaskCard
+            task={item}
             onPress={handleTaskPress}
-            onToggleComplete={handleToggleComplete}
+            onStatusChange={handleStatusChange}
           />
         )}
+        keyExtractor={item => item.id}
         contentContainerStyle={styles.listContent}
-        ListEmptyComponent={
-          <Text style={[styles.emptyText, { color: theme.colors.text }]}>
-            Nenhuma tarefa encontrada
-          </Text>
-        }
+        ListEmptyComponent={() => (
+          <View style={styles.emptyContainer}>
+            <Text style={[
+              styles.emptyText,
+              { color: theme.colors.text.secondary }
+            ]}>
+              {searchQuery
+                ? 'Nenhuma tarefa encontrada para sua pesquisa'
+                : 'Nenhuma tarefa cadastrada no momento'}
+            </Text>
+            <Text style={[
+              styles.emptySubText,
+              { color: theme.colors.text.secondary }
+            ]}>
+              Toque no botão "+" abaixo para adicionar uma nova tarefa
+            </Text>
+          </View>
+        )}
       />
-      
-      <FloatingActionButton onPress={handleAddTask} />
+      <FloatingActionButton
+        onPress={() => navigation.navigate('TaskForm')}
+        icon="+"
+      />
     </View>
   );
 };
@@ -137,19 +186,33 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
-  filtersContainer: {
-    padding: 16,
+  centerContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   listContent: {
-    padding: 16,
-    paddingTop: 0,
+    paddingVertical: 8,
+    flexGrow: 1,
+  },
+  errorText: {
+    fontSize: 16,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+    marginTop: 50,
   },
   emptyText: {
+    fontSize: 18,
     textAlign: 'center',
-    marginTop: 40,
-    fontSize: 16,
+    marginBottom: 10,
+  },
+  emptySubText: {
+    fontSize: 14,
+    textAlign: 'center',
     opacity: 0.7,
   },
 });
-
-export default HomeScreen;

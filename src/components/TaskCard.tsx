@@ -1,169 +1,209 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Animated } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import React, { useEffect, useState } from 'react';
+import { StyleSheet, View, Text, TouchableOpacity } from 'react-native';
 import { useTheme } from '../contexts/ThemeContext';
-import { Task } from '../types';
+import { Task, Category } from '../types';
+import { CategoryService } from '../services/CategoryService';
+import { getStatusColor, getStatusText } from '../utils/statusUtils';
+import { TaskService } from '../services/TaskService';
 
 interface TaskCardProps {
   task: Task;
   onPress: (task: Task) => void;
-  onToggleComplete: (task: Task) => void;
+  onStatusChange?: (task: Task) => void;
 }
 
-/**
- * Cartão de tarefa
- * 
- * Exibe os detalhes de uma tarefa e permite marcar como concluída
- */
-const TaskCard: React.FC<TaskCardProps> = ({ task, onPress, onToggleComplete }) => {
+export const TaskCard = ({ task, onPress, onStatusChange }: TaskCardProps) => {
   const { theme } = useTheme();
-  const scaleAnim = React.useRef(new Animated.Value(1)).current;
-  
-  // Anima o cartão quando pressionado
-  const animatePress = () => {
-    Animated.sequence([
-      Animated.timing(scaleAnim, {
-        toValue: 0.95,
-        duration: 100,
-        useNativeDriver: true,
-      }),
-      Animated.timing(scaleAnim, {
-        toValue: 1,
-        duration: 150,
-        useNativeDriver: true,
-      })
-    ]).start();
-    
-    onPress(task);
-  };
+  const [category, setCategory] = useState<Category | null>(null);
+  const [currentTask, setCurrentTask] = useState<Task>(task);
 
-  // Retorna o ícone correspondente à categoria da tarefa
-  const getCategoryIcon = () => {
-    switch (task.category) {
-      case 'limpeza':
-        return 'brush';
-      case 'cozinha':
-        return 'restaurant';
-      case 'compras':
-        return 'cart';
-      case 'lavanderia':
-        return 'shirt';
-      case 'manutenção':
-        return 'construct';
-      case 'outros':
-      default:
-        return 'list';
+  // Buscar categoria da tarefa
+  useEffect(() => {
+    const fetchCategory = async () => {
+      if (currentTask.categoryId) {
+        try {
+          const categoryData = await CategoryService.getCategoryById(currentTask.categoryId);
+          setCategory(categoryData);
+        } catch (error) {
+          console.error('Erro ao buscar categoria:', error);
+        }
+      }
+    };
+
+    fetchCategory();
+  }, [currentTask.categoryId]);
+
+  // Atualiza o estado local quando a tarefa muda
+  useEffect(() => {
+    setCurrentTask(task);
+  }, [task]);
+
+  // Função para formatar a data
+  const formatDate = (dateStr: string | undefined) => {
+    if (!dateStr) return '';
+    try {
+      return new Date(dateStr).toLocaleDateString('pt-BR');
+    } catch (error) {
+      console.error('Erro ao formatar data:', error);
+      return '';
     }
   };
 
-  // Retorna a cor correspondente à categoria da tarefa
-  const getCategoryColor = () => {
-    switch (task.category) {
-      case 'limpeza':
-        return '#4CAF50'; // Verde
-      case 'cozinha':
-        return '#FF9800'; // Laranja
-      case 'compras':
-        return '#2196F3'; // Azul
-      case 'lavanderia':
-        return '#9C27B0'; // Roxo
-      case 'manutenção':
-        return '#F44336'; // Vermelho
-      case 'outros':
-      default:
-        return '#607D8B'; // Cinza azulado
+  // Função para alternar o status da tarefa
+  const toggleStatus = async () => {
+    // Define o próximo status em um ciclo: pendente -> em andamento -> concluída -> pendente
+    const nextStatus: Task['status'] = 
+      currentTask.status === 'pending' ? 'in_progress' :
+      currentTask.status === 'in_progress' ? 'completed' : 'pending';
+    
+    try {
+      // Atualiza o status no banco de dados
+      await TaskService.updateTask(currentTask.id, { status: nextStatus });
+      
+      // Atualiza o estado local
+      const updatedTask = { ...currentTask, status: nextStatus };
+      setCurrentTask(updatedTask);
+      
+      // Notifica o componente pai sobre a mudança
+      if (onStatusChange) {
+        onStatusChange(updatedTask);
+      }
+    } catch (error) {
+      console.error('Erro ao atualizar status:', error);
     }
   };
 
   return (
-    <Animated.View style={{
-      transform: [{ scale: scaleAnim }]
-    }}>
-      <TouchableOpacity
-        style={[styles.container, { backgroundColor: theme.colors.card }]}
-        onPress={animatePress}
-        activeOpacity={0.7}
-      >
-        <View style={styles.content}>
-          <View style={[styles.categoryIcon, { backgroundColor: getCategoryColor() }]}>
-            <Ionicons name={getCategoryIcon()} size={20} color="#FFF" />
-          </View>
-          
-          <View style={styles.textContainer}>
-            <Text 
-              style={[styles.title, { 
-                color: theme.colors.text,
-                textDecorationLine: task.completed ? 'line-through' : 'none',
-                opacity: task.completed ? 0.7 : 1
-              }]}
-              numberOfLines={1}
-            >
-              {task.title}
+    <TouchableOpacity
+      style={{
+        backgroundColor: theme.colors.surface,
+        borderRadius: theme.roundness.medium,
+        padding: theme.spacing.md,
+        marginVertical: theme.spacing.sm,
+        marginHorizontal: theme.spacing.md,
+        elevation: 3,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.25,
+        shadowRadius: 3.84,
+      }}
+      onPress={() => onPress(currentTask)}
+    >
+      <View style={styles.header}>
+        <Text style={[
+          styles.title,
+          { color: theme.colors.text.primary }
+        ]}>{currentTask.title}</Text>
+        <TouchableOpacity
+          style={[
+            styles.status,
+            { backgroundColor: getStatusColor(currentTask.status) }
+          ]}
+          onPress={toggleStatus}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.statusText}>
+            {getStatusText(currentTask.status)}
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {currentTask.description && (
+        <Text style={[
+          styles.description,
+          { color: theme.colors.text.secondary }
+        ]} numberOfLines={2}>
+          {currentTask.description}
+        </Text>
+      )}
+
+      <View style={styles.infoContainer}>
+        {category && (
+          <View style={styles.categoryContainer}>
+            <Text style={styles.categoryIcon}>{category.icon}</Text>
+            <Text style={[
+              styles.categoryText,
+              { color: theme.colors.text.secondary }
+            ]}>
+              {category.name}
             </Text>
-            
-            {task.description ? (
-              <Text 
-                style={[styles.description, { color: theme.colors.text, opacity: 0.7 }]}
-                numberOfLines={1}
-              >
-                {task.description}
-              </Text>
-            ) : null}
           </View>
-          
-          <TouchableOpacity 
-            style={styles.checkbox} 
-            onPress={() => onToggleComplete(task)}
-          >
-            <Ionicons 
-              name={task.completed ? 'checkmark-circle' : 'ellipse-outline'} 
-              size={24} 
-              color={task.completed ? theme.colors.primary : theme.colors.text} 
-            />
-          </TouchableOpacity>
-        </View>
-      </TouchableOpacity>
-    </Animated.View>
+        )}
+
+        {currentTask.deadline && (
+          <Text style={[
+            styles.infoText,
+            { color: theme.colors.text.secondary }
+          ]}>
+            Prazo: {formatDate(currentTask.deadline)}
+          </Text>
+        )}
+      </View>
+
+      {currentTask.assignedTo && (
+        <Text style={[
+          styles.assignedText,
+          { color: theme.colors.text.secondary }
+        ]}>
+          Responsável: {currentTask.assignedTo}
+        </Text>
+      )}
+    </TouchableOpacity>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    borderRadius: 12,
-    marginBottom: 12,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.2,
-    shadowRadius: 1.5,
-  },
-  content: {
+  header: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 16,
-  },
-  categoryIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  textContainer: {
-    flex: 1,
+    marginBottom: 8,
   },
   title: {
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
+    fontSize: 18,
+    fontWeight: 'bold',
+    flex: 1,
+  },
+  status: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    marginLeft: 8,
+    // Adiciona uma borda sutil para indicar que é clicável
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  statusText: {
+    color: '#FFFFFF',
+    fontSize: 13,
+    fontWeight: 'bold',
   },
   description: {
     fontSize: 14,
+    marginBottom: 12,
   },
-  checkbox: {
-    padding: 4,
+  infoContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  categoryContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  categoryIcon: {
+    fontSize: 16,
+    marginRight: 4,
+  },
+  categoryText: {
+    fontSize: 14,
+  },
+  infoText: {
+    fontSize: 14,
+  },
+  assignedText: {
+    fontSize: 14,
+    fontStyle: 'italic',
   },
 });
-
-export default TaskCard;
